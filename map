@@ -1,0 +1,328 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Low Signal Map Tracker</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    .map-container {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+      background: #e5e3df;
+    }
+
+    .control-panel {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 1000;
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.3);
+      width: 280px;
+      max-width: calc(100vw - 70px);
+    }
+
+    button {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+      margin-bottom: 8px;
+    }
+
+    button:hover {
+      background: #1557b0;
+    }
+
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .fallback-input-group {
+      display: none;
+      margin-top: 10px;
+      border-top: 1px dashed #ccc;
+      padding-top: 10px;
+    }
+
+    #status {
+      font-size: 12px;
+      color: #1a73e8;
+      font-weight: bold;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .user-location-dot {
+      width: 14px;
+      height: 14px;
+      background: #1a73e8;
+      border: 3px solid white;
+      border-radius: 50%;
+      box-shadow: 0 0 5px rgba(0,0,0,.4);
+      position: relative;
+      box-sizing: content-box;
+    }
+
+    .user-location-dot::after {
+      content: "";
+      position: absolute;
+      top: -3px;
+      left: -3px;
+      width: 14px;
+      height: 14px;
+      border: 3px solid #1a73e8;
+      border-radius: 50%;
+      animation: pulse-aura 2s infinite ease-out;
+      opacity: 0;
+      box-sizing: content-box;
+    }
+
+    @keyframes pulse-aura {
+      0% {
+        transform: scale(1);
+        opacity: .6;
+      }
+      100% {
+        transform: scale(3.5);
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="map-container">
+  <div class="control-panel">
+    <button onclick="tryAcquireLocation()">
+      Locate Me (Pulsing Dot)
+    </button>
+
+    <div id="status">Signal Status: Ready.</div>
+
+    <div id="fallback-ui" class="fallback-input-group">
+      <input
+        type="text"
+        id="manual-coords"
+        placeholder="Enter city or ZIP code"
+      >
+      <button
+        style="background:#34a853"
+        onclick="manualSearch()"
+      >
+        Search Location
+      </button>
+    </div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  const statusText = document.getElementById("status");
+  const fallbackUi = document.getElementById("fallback-ui");
+
+  let locationMarker = null;
+
+  const map = L.map("map", {
+    zoomControl: false
+  }).setView([20, 0], 2);
+
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+
+  // Official OpenStreetMap tile endpoint.
+  // Attribution must remain visible.
+  L.tileLayer(
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">' +
+        'OpenStreetMap contributors</a>'
+    }
+  ).addTo(map);
+
+  function setStatus(message, color = "#1a73e8") {
+    statusText.style.color = color;
+    statusText.textContent = message;
+  }
+
+  function tryAcquireLocation() {
+    setStatus("Requesting device location...");
+
+    if (!navigator.geolocation) {
+      setStatus("Device location unavailable. Try manual search.");
+      fallbackUi.style.display = "block";
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      
+position => {
+  const lat = position.coords.latitude;
+  const lng = position.coords.longitude;
+  const accuracy = position.coords.accuracy;
+
+  console.log("GPS LATITUDE:", lat);
+  console.log("GPS LONGITUDE:", lng);
+  console.log("GPS ACCURACY:", accuracy, "meters");
+
+  alert(
+    "Latitude: " + lat +
+    "\nLongitude: " + lng +
+    "\nAccuracy: " + Math.round(accuracy) + " meters"
+  );
+
+  showPosition(lat, lng, "Device location");
+},
+
+      error => {
+        let message = "Location permission or GPS unavailable.";
+
+        if (error.code === error.TIMEOUT) {
+          message = "Location request timed out.";
+        }
+
+        setStatus(message + " Try searching for a city or ZIP.");
+        fallbackUi.style.display = "block";
+      },
+        {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0
+        }
+    );
+  }
+
+  async function manualSearch() {
+    const query = document
+      .getElementById("manual-coords")
+      .value.trim();
+
+    if (!query) {
+      alert("Enter a city or ZIP code.");
+      return;
+    }
+
+    setStatus("Searching for location...");
+
+    try {
+      const url = new URL(
+        "https://nominatim.openstreetmap.org/search"
+      );
+
+      url.searchParams.set("format", "jsonv2");
+      url.searchParams.set("limit", "1");
+      url.searchParams.set("q", query);
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error("Search service returned HTTP " + response.status);
+      }
+
+      const data = await response.json();
+
+      if (!data.length) {
+        setStatus("Location not found. Try another search.", "#d93025");
+        return;
+      }
+
+      const result = data[0];
+
+     const lat = position.coords.latitude;
+const lng = position.coords.longitude;
+const accuracy = position.coords.accuracy;
+
+console.log("Latitude:", lat);
+console.log("Longitude:", lng);
+console.log("Reported accuracy:", accuracy, "meters");
+
+showPosition(lat, lng, "Device location");
+
+setStatus(
+  `Reported accuracy: ±${Math.round(accuracy)} meters`
+);
+    } catch (error) {
+      setStatus(
+        "Search failed. Check your connection and try again.",
+        "#d93025"
+      );
+      console.error(error);
+    }
+  }
+
+  function showPosition(lat, lng, label) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
+        lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setStatus("Invalid coordinates received.", "#d93025");
+      return;
+    }
+
+    map.setView([lat, lng], 14);
+
+    if (locationMarker) {
+      map.removeLayer(locationMarker);
+    }
+
+    const dotIcon = L.divIcon({
+      className: "user-location-dot",
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+
+    locationMarker = L.marker([lat, lng], {
+      icon: dotIcon
+    }).addTo(map);
+
+    locationMarker.bindPopup(
+      "Location: " + String(label) +
+      "<br>Latitude: " + lat.toFixed(5) +
+      "<br>Longitude: " + lng.toFixed(5)
+    );
+
+    setStatus(
+      "Location found: " + label +
+      " | Lat: " + lat.toFixed(4) +
+      " | Lng: " + lng.toFixed(4),
+      "#1e8e3e"
+    );
+  }
+</script>
+
+</body>
+</html>
