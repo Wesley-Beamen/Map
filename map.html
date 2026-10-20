@@ -112,6 +112,22 @@
       animation: pulse-aura 2s infinite ease-out;
       box-sizing: content-box;
     }
+    .avatar-marker {
+  width: 46px;
+  height: 46px;
+  border: 3px solid white;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #1a73e8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.avatar-marker img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
     @keyframes pulse-aura {
       0% {
@@ -134,10 +150,21 @@
 
 <body>
   <div class="map-container">
-    <div class="control-panel">
-      <button onclick="alert('Button works!'); tryAcquireLocation();">
-  Locate Me
-      </button>
+    <div style="margin-top:12px; border-top:1px solid #ddd; padding-top:12px;">
+  <label for="avatar-file">Profile picture</label>
+
+  <input
+    id="avatar-file"
+    type="file"
+    accept="image/png,image/jpeg,image/webp"
+  >
+
+  <button id="upload-avatar" type="button">
+    Upload Profile Picture
+  </button>
+
+  <div id="avatar-status" role="status"></div>
+</div>
 
       <div id="status" role="status" aria-live="polite">
         Ready. Tap Locate Me to request your location.
@@ -177,6 +204,7 @@ let userMarker = null;
 let accuracyCircle = null;
 let locationWatchId = null;
 let locationTimeout = null;
+let profileAvatarUrl = null;
 
 function setStatus(message) {
   const status = document.getElementById("status");
@@ -221,6 +249,31 @@ function initializeMap() {
     map.invalidateSize();
   }, 300);
 }
+function createAvatarIcon(url) {
+  const image = url
+    ? `<img src="${url}" alt="Player location">`
+    : `<div style="
+        width:100%;height:100%;
+        display:flex;align-items:center;
+        justify-content:center;color:white;
+        font-size:24px;">●</div>`;
+
+  return L.divIcon({
+    className: "",
+    html: `<div class="avatar-marker">${image}</div>`,
+    iconSize: [46, 46],
+    iconAnchor: [23, 23],
+    popupAnchor: [0, -23]
+  });
+}
+
+window.setProfileAvatar = function(url) {
+  profileAvatarUrl = url;
+
+  if (userMarker) {
+    userMarker.setIcon(createAvatarIcon(url));
+  }
+};
 
 function showPosition(latitude, longitude, label, accuracy) {
   if (!map) {
@@ -235,10 +288,13 @@ function showPosition(latitude, longitude, label, accuracy) {
   const position = [latitude, longitude];
 
   if (!userMarker) {
-    userMarker = L.marker(position).addTo(map);
-  } else {
-    userMarker.setLatLng(position);
-  }
+  userMarker = L.marker(position, {
+    icon: createAvatarIcon(profileAvatarUrl)
+  }).addTo(map);
+} else {
+  userMarker.setLatLng(position);
+  userMarker.setIcon(createAvatarIcon(profileAvatarUrl));
+}
 
   userMarker.bindPopup(
     `<b>${label}</b><br>` +
