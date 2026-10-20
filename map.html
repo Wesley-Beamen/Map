@@ -4,12 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Low Signal Map Tracker</title>
+  <meta name="theme-color" content="#1a73e8">
+  <title>GPS Location Tracker</title>
 
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  >
 
   <style>
     html, body {
@@ -23,6 +24,7 @@
       position: relative;
       width: 100%;
       height: 100vh;
+      height: 100dvh;
     }
 
     #map {
@@ -33,54 +35,59 @@
 
     .control-panel {
       position: absolute;
-      top: 20px;
-      left: 20px;
+      top: 15px;
+      left: 15px;
       z-index: 1000;
       background: white;
       padding: 15px;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,.3);
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
       width: 280px;
       max-width: calc(100vw - 70px);
     }
 
     button {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 8px;
+      border: 0;
+      border-radius: 5px;
       background: #1a73e8;
       color: white;
-      border: none;
-      padding: 12px;
       font-size: 14px;
       font-weight: bold;
-      border-radius: 4px;
       cursor: pointer;
-      width: 100%;
-      margin-bottom: 8px;
     }
 
-    button:hover {
-      background: #1557b0;
+    button:disabled {
+      opacity: .6;
+      cursor: wait;
     }
 
     input {
       box-sizing: border-box;
       width: 100%;
-      padding: 8px;
+      padding: 10px;
       margin-bottom: 8px;
       border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-
-    .fallback-input-group {
-      display: none;
-      margin-top: 10px;
-      border-top: 1px dashed #ccc;
-      padding-top: 10px;
+      border-radius: 5px;
+      font-size: 16px;
     }
 
     #status {
       font-size: 12px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
       color: #1a73e8;
-      font-weight: bold;
+    }
+
+    #diagnostics {
+      display: none;
+      margin-top: 10px;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 5px;
+      font-size: 12px;
       line-height: 1.5;
       overflow-wrap: anywhere;
     }
@@ -91,7 +98,7 @@
       background: #1a73e8;
       border: 3px solid white;
       border-radius: 50%;
-      box-shadow: 0 0 5px rgba(0,0,0,.4);
+      box-shadow: 0 0 5px #555;
       position: relative;
       box-sizing: content-box;
     }
@@ -99,230 +106,394 @@
     .user-location-dot::after {
       content: "";
       position: absolute;
-      top: -3px;
-      left: -3px;
-      width: 14px;
-      height: 14px;
+      inset: -3px;
       border: 3px solid #1a73e8;
       border-radius: 50%;
       animation: pulse-aura 2s infinite ease-out;
-      opacity: 0;
       box-sizing: content-box;
     }
 
     @keyframes pulse-aura {
       0% {
         transform: scale(1);
-        opacity: .6;
+        opacity: .65;
       }
       100% {
         transform: scale(3.5);
         opacity: 0;
       }
     }
+
+    @media (prefers-reduced-motion: reduce) {
+      .user-location-dot::after {
+        animation: none;
+      }
+    }
   </style>
 </head>
+
 <body>
-
-<div class="map-container">
-  <div class="control-panel">
-    <button onclick="tryAcquireLocation()">
-      Locate Me (Pulsing Dot)
-    </button>
-
-    <div id="status">Signal Status: Ready.</div>
-
-    <div id="fallback-ui" class="fallback-input-group">
-      <input
-        type="text"
-        id="manual-coords"
-        placeholder="Enter city or ZIP code"
-      >
-      <button
-        style="background:#34a853"
-        onclick="manualSearch()"
-      >
-        Search Location
+  <div class="map-container">
+    <div class="control-panel">
+      <button id="locate-button" type="button">
+        Locate Me
       </button>
+
+      <div id="status" role="status" aria-live="polite">
+        Ready. Tap Locate Me to request your location.
+      </div>
+
+      <div style="margin-top:12px; border-top:1px solid #ddd; padding-top:12px;">
+        <input
+          id="manual-location"
+          type="search"
+          placeholder="Enter city or ZIP code"
+          autocomplete="off"
+        >
+
+        <button id="search-button" type="button"
+                style="background:#188038;">
+          Search Location
+        </button>
+      </div>
+
+      <button id="diagnostic-button" type="button"
+              style="background:#5f6368;">
+        Show Diagnostics
+      </button>
+
+      <div id="diagnostics"></div>
     </div>
+
+    <div id="map"></div>
   </div>
 
-  <div id="map"></div>
-</div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    "use strict";
 
-<script>
-  const statusText = document.getElementById("status");
-  const fallbackUi = document.getElementById("fallback-ui");
+    const statusText = document.getElementById("status");
+    const diagnostics = document.getElementById("diagnostics");
+    const locateButton = document.getElementById("locate-button");
+    const searchButton = document.getElementById("search-button");
+    const diagnosticButton = document.getElementById("diagnostic-button");
+    const manualInput = document.getElementById("manual-location");
 
-  let locationMarker = null;
+    let locationMarker = null;
+    let accuracyCircle = null;
+    let locationRequestInProgress = false;
 
-  const map = L.map("map", {
-    zoomControl: false
-  }).setView([20, 0], 2);
+    const map = L.map("map", {
+      zoomControl: false
+    }).setView([20, 0], 2);
 
-  L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.control.zoom({
+      position: "bottomright"
+    }).addTo(map);
 
-  // Official OpenStreetMap tile endpoint.
-  // Attribution must remain visible.
-  L.tileLayer(
-    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-      maxZoom: 19,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">' +
-        'OpenStreetMap contributors</a>'
-    }
-  ).addTo(map);
+    // Use the official OpenStreetMap tile endpoint.
+    // Follow its usage policy and retain visible attribution.
+    L.tileLayer(
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        maxZoom: 19,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">' +
+          'OpenStreetMap contributors</a>'
+      }
+    ).addTo(map);
 
-  function setStatus(message, color = "#1a73e8") {
-    statusText.style.color = color;
-    statusText.textContent = message;
-  }
-
-  function tryAcquireLocation() {
-    setStatus("Requesting device location...");
-
-    if (!navigator.geolocation) {
-      setStatus("Device location unavailable. Try manual search.");
-      fallbackUi.style.display = "block";
-      return;
+    function setStatus(message, color = "#1a73e8") {
+      statusText.style.color = color;
+      statusText.textContent = message;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      
-position => {
-  const lat = position.coords.latitude;
-  const lng = position.coords.longitude;
-  const accuracy = position.coords.accuracy;
+    function showDiagnostics(info) {
+      diagnostics.style.display = "block";
+      diagnostics.replaceChildren();
 
-  console.log("GPS LATITUDE:", lat);
-  console.log("GPS LONGITUDE:", lng);
-  console.log("GPS ACCURACY:", accuracy, "meters");
-
-  alert(
-    "Latitude: " + lat +
-    "\nLongitude: " + lng +
-    "\nAccuracy: " + Math.round(accuracy) + " meters"
-  );
-
-  showPosition(lat, lng, "Device location");
-},
-
-      error => {
-        let message = "Location permission or GPS unavailable.";
-
-        if (error.code === error.TIMEOUT) {
-          message = "Location request timed out.";
-        }
-
-        setStatus(message + " Try searching for a city or ZIP.");
-        fallbackUi.style.display = "block";
-      },
-        {
-            enableHighAccuracy: true,
-            timeout: 20000,
-            maximumAge: 0
-        }
-    );
-  }
-
-  async function manualSearch() {
-    const query = document
-      .getElementById("manual-coords")
-      .value.trim();
-
-    if (!query) {
-      alert("Enter a city or ZIP code.");
-      return;
-    }
-
-    setStatus("Searching for location...");
-
-    try {
-      const url = new URL(
-        "https://nominatim.openstreetmap.org/search"
-      );
-
-      url.searchParams.set("format", "jsonv2");
-      url.searchParams.set("limit", "1");
-      url.searchParams.set("q", query);
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error("Search service returned HTTP " + response.status);
+      for (const [key, value] of Object.entries(info)) {
+        const line = document.createElement("div");
+        line.textContent = key + ": " + String(value);
+        diagnostics.appendChild(line);
       }
 
-      const data = await response.json();
+      console.log("Location diagnostics:", info);
+    }
 
-      if (!data.length) {
-        setStatus("Location not found. Try another search.", "#d93025");
+    function getErrorDescription(error) {
+      switch (error.code) {
+        case 1:
+          return "Permission denied. Allow location access for this website.";
+        case 2:
+          return "Position unavailable. Your device could not determine its location.";
+        case 3:
+          return "Location timed out. Try again outdoors.";
+        default:
+          return "An unknown location error occurred.";
+      }
+    }
+
+    function displayLocationError(error) {
+      const info = {
+        "Error code": error.code,
+        "Error message": error.message || "(no message supplied)",
+        "HTTPS / secure context": window.isSecureContext,
+        "Page URL": location.href,
+        "Browser": navigator.userAgent
+      };
+
+      setStatus(getErrorDescription(error), "#d93025");
+
+      if (navigator.permissions &&
+          navigator.permissions.query) {
+        navigator.permissions.query({ name: "geolocation" })
+          .then(result => {
+            info["Location permission"] = result.state;
+            showDiagnostics(info);
+          })
+          .catch(() => showDiagnostics(info));
+      } else {
+        info["Location permission"] = "Permission API unavailable";
+        showDiagnostics(info);
+      }
+    }
+
+    function showPosition(lat, lng, label, accuracy = null) {
+      if (!Number.isFinite(lat) ||
+          !Number.isFinite(lng) ||
+          lat < -90 || lat > 90 ||
+          lng < -180 || lng > 180) {
+        setStatus("Invalid coordinates received.", "#d93025");
         return;
       }
 
-      const result = data[0];
+      map.setView([lat, lng], 17);
 
-     const lat = position.coords.latitude;
-const lng = position.coords.longitude;
-const accuracy = position.coords.accuracy;
+      const dotIcon = L.divIcon({
+        className: "user-location-dot",
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
+      });
 
-console.log("Latitude:", lat);
-console.log("Longitude:", lng);
-console.log("Reported accuracy:", accuracy, "meters");
+      if (locationMarker) {
+        map.removeLayer(locationMarker);
+      }
 
-showPosition(lat, lng, "Device location");
+      if (accuracyCircle) {
+        map.removeLayer(accuracyCircle);
+        accuracyCircle = null;
+      }
 
-setStatus(
-  `Reported accuracy: ±${Math.round(accuracy)} meters`
-);
-    } catch (error) {
+      locationMarker = L.marker([lat, lng], {
+        icon: dotIcon
+      }).addTo(map);
+
+      const popupContent = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = label;
+      popupContent.appendChild(title);
+
+      const coords = document.createElement("div");
+      coords.textContent =
+        "Latitude: " + lat.toFixed(7) +
+        "\nLongitude: " + lng.toFixed(7);
+      coords.style.whiteSpace = "pre-line";
+      popupContent.appendChild(coords);
+
+      if (Number.isFinite(accuracy)) {
+        const accuracyText = document.createElement("div");
+        accuracyText.textContent =
+          "Reported accuracy: ±" + Math.round(accuracy) + " meters";
+        popupContent.appendChild(accuracyText);
+
+        accuracyCircle = L.circle([lat, lng], {
+          radius: accuracy,
+          color: "#1a73e8",
+          fillColor: "#1a73e8",
+          fillOpacity: 0.12,
+          weight: 2
+        }).addTo(map);
+      }
+
+      locationMarker.bindPopup(popupContent);
+
       setStatus(
-        "Search failed. Check your connection and try again.",
-        "#d93025"
+        "Location: " + label +
+        " | " + lat.toFixed(5) +
+        ", " + lng.toFixed(5) +
+        (Number.isFinite(accuracy)
+          ? " | Accuracy ±" + Math.round(accuracy) + " m"
+          : ""),
+        "#188038"
       );
-      console.error(error);
-    }
-  }
 
-  function showPosition(lat, lng, label) {
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
-        lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      setStatus("Invalid coordinates received.", "#d93025");
-      return;
-    }
-
-    map.setView([lat, lng], 14);
-
-    if (locationMarker) {
-      map.removeLayer(locationMarker);
+      showDiagnostics({
+        Latitude: lat,
+        Longitude: lng,
+        "Reported accuracy": Number.isFinite(accuracy)
+          ? accuracy + " meters"
+          : "Not available",
+        "Secure context": window.isSecureContext
+      });
     }
 
-    const dotIcon = L.divIcon({
-      className: "user-location-dot",
-      iconSize: [20, 20],
-      iconAnchor: [10, 10]
+    function tryAcquireLocation() {
+      if (locationRequestInProgress) return;
+
+      if (!window.isSecureContext) {
+        setStatus(
+          "This page is not in a secure context. Open the HTTPS GitHub Pages URL.",
+          "#d93025"
+        );
+        showDiagnostics({
+          "Page URL": location.href,
+          "Secure context": window.isSecureContext
+        });
+        return;
+      }
+
+      if (!navigator.geolocation) {
+        setStatus(
+          "Geolocation is not supported by this browser.",
+          "#d93025"
+        );
+        showDiagnostics({
+          "Geolocation API": "Unavailable",
+          "Browser": navigator.userAgent
+        });
+        return;
+      }
+
+      locationRequestInProgress = true;
+      locateButton.disabled = true;
+      setStatus("Requesting your device location...");
+
+      navigator.geolocation.getCurrentPosition(
+        position => {
+          locationRequestInProgress = false;
+          locateButton.disabled = false;
+
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const accuracy = position.coords.accuracy;
+
+          console.log("GPS LATITUDE:", lat);
+          console.log("GPS LONGITUDE:", lng);
+          console.log("GPS ACCURACY:", accuracy, "meters");
+
+          showPosition(lat, lng, "Device location", accuracy);
+        },
+
+        error => {
+          locationRequestInProgress = false;
+          locateButton.disabled = false;
+          displayLocationError(error);
+        },
+
+        {
+          enableHighAccuracy: true,
+          timeout: 30000,
+          maximumAge: 0
+        }
+      );
+    }
+
+    async function manualSearch() {
+      const query = manualInput.value.trim();
+
+      if (!query) {
+        setStatus("Enter a city or ZIP code.", "#d93025");
+        return;
+      }
+
+      searchButton.disabled = true;
+      setStatus("Searching for location...");
+
+      try {
+        const url = new URL(
+          "https://nominatim.openstreetmap.org/search"
+        );
+
+        url.searchParams.set("format", "jsonv2");
+        url.searchParams.set("limit", "1");
+        url.searchParams.set("q", query);
+
+        const response = await fetch(url.toString(), {
+          headers: {
+            "Accept": "application/json"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error("Search HTTP status: " + response.status);
+        }
+
+        const results = await response.json();
+
+        if (!results.length) {
+          setStatus("Location not found. Try another search.", "#d93025");
+          return;
+        }
+
+        const result = results[0];
+
+        showPosition(
+          Number(result.lat),
+          Number(result.lon),
+          result.display_name || query
+        );
+
+      } catch (error) {
+        console.error("Search error:", error);
+
+        setStatus(
+          "Search failed: " + error.message,
+          "#d93025"
+        );
+
+      } finally {
+        searchButton.disabled = false;
+      }
+    }
+
+    function toggleDiagnostics() {
+      if (diagnostics.style.display === "block") {
+        diagnostics.style.display = "none";
+        return;
+      }
+
+      const info = {
+        "Page URL": location.href,
+        "HTTPS / secure context": window.isSecureContext,
+        "Geolocation supported": Boolean(navigator.geolocation),
+        "Online": navigator.onLine,
+        "Browser": navigator.userAgent
+      };
+
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: "geolocation" })
+          .then(result => {
+            info["Location permission"] = result.state;
+            showDiagnostics(info);
+          })
+          .catch(() => showDiagnostics(info));
+      } else {
+        info["Location permission"] = "Permission API unavailable";
+        showDiagnostics(info);
+      }
+    }
+
+    locateButton.addEventListener("click", tryAcquireLocation);
+    searchButton.addEventListener("click", manualSearch);
+    diagnosticButton.addEventListener("click", toggleDiagnostics);
+
+    manualInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        manualSearch();
+      }
     });
-
-    locationMarker = L.marker([lat, lng], {
-      icon: dotIcon
-    }).addTo(map);
-
-    locationMarker.bindPopup(
-      "Location: " + String(label) +
-      "<br>Latitude: " + lat.toFixed(5) +
-      "<br>Longitude: " + lng.toFixed(5)
-    );
-
-    setStatus(
-      "Location found: " + label +
-      " | Lat: " + lat.toFixed(4) +
-      " | Lng: " + lng.toFixed(4),
-      "#1e8e3e"
-    );
-  }
-</script>
-
+  </script>
 </body>
 </html>
