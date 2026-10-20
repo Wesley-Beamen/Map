@@ -171,232 +171,177 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    "use strict";
-
-    const statusText = document.getElementById("status");
-    const diagnostics = document.getElementById("diagnostics");
-    const locateButton = document.getElementById("locate-button");
-    const searchButton = document.getElementById("search-button");
-    const diagnosticButton = document.getElementById("diagnostic-button");
-    const manualInput = document.getElementById("manual-location");
-
-    let locationMarker = null;
-    let accuracyCircle = null;
-    let locationRequestInProgress = false;
-
-    const map = L.map("map", {
-      zoomControl: false
-    }).setView([20, 0], 2);
-
-    L.control.zoom({
-      position: "bottomright"
-    }).addTo(map);
-
-    // Use the official OpenStreetMap tile endpoint.
-    // Follow its usage policy and retain visible attribution.
-    L.tileLayer(
-      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      {
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">' +
-          'OpenStreetMap contributors</a>'
-      }
-    ).addTo(map);
-
-    function setStatus(message, color = "#1a73e8") {
-      statusText.style.color = color;
-      statusText.textContent = message;
-    }
-
-    function showDiagnostics(info) {
-      diagnostics.style.display = "block";
-      diagnostics.replaceChildren();
-
-      for (const [key, value] of Object.entries(info)) {
-        const line = document.createElement("div");
-        line.textContent = key + ": " + String(value);
-        diagnostics.appendChild(line);
-      }
-
-      console.log("Location diagnostics:", info);
-    }
-
-    function getErrorDescription(error) {
-      switch (error.code) {
-        case 1:
-          return "Permission denied. Allow location access for this website.";
-        case 2:
-          return "Position unavailable. Your device could not determine its location.";
-        case 3:
-          return "Location timed out. Try again outdoors.";
-        default:
-          return "An unknown location error occurred.";
-      }
-    }
-
-    function displayLocationError(error) {
-      const info = {
-        "Error code": error.code,
-        "Error message": error.message || "(no message supplied)",
-        "HTTPS / secure context": window.isSecureContext,
-        "Page URL": location.href,
-        "Browser": navigator.userAgent
-      };
-
-      setStatus(getErrorDescription(error), "#d93025");
-
-      if (navigator.permissions &&
-          navigator.permissions.query) {
-        navigator.permissions.query({ name: "geolocation" })
-          .then(result => {
-            info["Location permission"] = result.state;
-            showDiagnostics(info);
-          })
-          .catch(() => showDiagnostics(info));
-      } else {
-        info["Location permission"] = "Permission API unavailable";
-        showDiagnostics(info);
-      }
-    }
-
-    function showPosition(lat, lng, label, accuracy = null) {
-      if (!Number.isFinite(lat) ||
-          !Number.isFinite(lng) ||
-          lat < -90 || lat > 90 ||
-          lng < -180 || lng > 180) {
-        setStatus("Invalid coordinates received.", "#d93025");
-        return;
-      }
-
-      map.setView([lat, lng], 17);
-
-      const dotIcon = L.divIcon({
-        className: "user-location-dot",
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
-      });
-
-      if (locationMarker) {
-        map.removeLayer(locationMarker);
-      }
-
-      if (accuracyCircle) {
-        map.removeLayer(accuracyCircle);
-        accuracyCircle = null;
-      }
-
-      locationMarker = L.marker([lat, lng], {
-        icon: dotIcon
-      }).addTo(map);
-
-      const popupContent = document.createElement("div");
-      const title = document.createElement("strong");
-      title.textContent = label;
-      popupContent.appendChild(title);
-
-      const coords = document.createElement("div");
-      coords.textContent =
-        "Latitude: " + lat.toFixed(7) +
-        "\nLongitude: " + lng.toFixed(7);
-      coords.style.whiteSpace = "pre-line";
-      popupContent.appendChild(coords);
-
-      if (Number.isFinite(accuracy)) {
-        const accuracyText = document.createElement("div");
-        accuracyText.textContent =
-          "Reported accuracy: ±" + Math.round(accuracy) + " meters";
-        popupContent.appendChild(accuracyText);
-
-        accuracyCircle = L.circle([lat, lng], {
-          radius: accuracy,
-          color: "#1a73e8",
-          fillColor: "#1a73e8",
-          fillOpacity: 0.12,
-          weight: 2
-        }).addTo(map);
-      }
-
-      locationMarker.bindPopup(popupContent);
-
-      setStatus(
-        "Location: " + label +
-        " | " + lat.toFixed(5) +
-        ", " + lng.toFixed(5) +
-        (Number.isFinite(accuracy)
-          ? " | Accuracy ±" + Math.round(accuracy) + " m"
-          : ""),
-        "#188038"
-      );
-
-      showDiagnostics({
-        Latitude: lat,
-        Longitude: lng,
-        "Reported accuracy": Number.isFinite(accuracy)
-          ? accuracy + " meters"
-          : "Not available",
-        "Secure context": window.isSecureContext
-      });
-    }
-
     
+let map;
+let userMarker = null;
+let accuracyCircle = null;
 let locationWatchId = null;
-let bestAccuracy = Infinity;
-
-
-let locationWatchId = null;
-let bestAccuracy = Infinity;
 let locationTimeout = null;
 
-function tryAcquireLocation() {
-  if (!navigator.geolocation) {
-    document.getElementById("status").textContent =
-      "Geolocation is not supported by this browser.";
+function setStatus(message) {
+  const status = document.getElementById("status");
+  if (status) {
+    status.textContent = message;
+  }
+}
+
+function initializeMap() {
+  const mapElement = document.getElementById("map");
+
+  if (!mapElement) {
+    console.error('Missing <div id="map"></div>');
+    setStatus("Error: Map container not found.");
     return;
   }
 
-  // Stop any previous tracking session.
+  if (typeof L === "undefined") {
+    setStatus("Error: Leaflet failed to load. Check your internet connection.");
+    console.error("Leaflet library is not loaded.");
+    return;
+  }
+
+  // Prevent the map from being initialized more than once.
+  if (map) {
+    map.invalidateSize();
+    return;
+  }
+
+  map = L.map("map").setView([39.8, -74.9], 15);
+
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+  }).addTo(map);
+
+  setStatus("Map ready. Tap Locate Me to find your location.");
+
+  // Fix map sizing after the page has rendered.
+  setTimeout(() => {
+    map.invalidateSize();
+  }, 300);
+}
+
+function showPosition(latitude, longitude, label, accuracy) {
+  if (!map) {
+    initializeMap();
+  }
+
+  if (!map) {
+    setStatus("Map could not be initialized.");
+    return;
+  }
+
+  const position = [latitude, longitude];
+
+  if (!userMarker) {
+    userMarker = L.marker(position).addTo(map);
+  } else {
+    userMarker.setLatLng(position);
+  }
+
+  userMarker.bindPopup(
+    `<b>${label}</b><br>` +
+    `Latitude: ${latitude.toFixed(6)}<br>` +
+    `Longitude: ${longitude.toFixed(6)}<br>` +
+    `Accuracy: ±${Math.round(accuracy)} meters`
+  );
+
+  if (!accuracyCircle) {
+    accuracyCircle = L.circle(position, {
+      radius: accuracy,
+      color: "#1677ff",
+      fillColor: "#1677ff",
+      fillOpacity: 0.15,
+      weight: 2
+    }).addTo(map);
+  } else {
+    accuracyCircle.setLatLng(position);
+    accuracyCircle.setRadius(accuracy);
+  }
+
+  map.setView(position, Math.max(map.getZoom(), 16));
+
+  setStatus(
+    `${label} — accuracy approximately ${Math.round(accuracy)} meters.`
+  );
+
+  console.log("GPS latitude:", latitude);
+  console.log("GPS longitude:", longitude);
+  console.log("GPS accuracy:", accuracy, "meters");
+}
+
+function tryAcquireLocation() {
+  // Make sure the map is available first.
+  initializeMap();
+
+  if (!map) return;
+
+  if (!("geolocation" in navigator)) {
+    setStatus("Your browser does not support location services.");
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    setStatus("Location requires a secure HTTPS website.");
+    return;
+  }
+
+  // Stop an earlier tracking session.
   if (locationWatchId !== null) {
     navigator.geolocation.clearWatch(locationWatchId);
+    locationWatchId = null;
   }
-  clearTimeout(locationTimeout);
 
-  bestAccuracy = Infinity;
+  if (locationTimeout !== null) {
+    clearTimeout(locationTimeout);
+    locationTimeout = null;
+  }
 
-  document.getElementById("status").textContent =
-    "Finding your location...";
+  setStatus("Requesting location permission and GPS fix...");
+
+  let receivedLocation = false;
 
   locationWatchId = navigator.geolocation.watchPosition(
     function (position) {
+      receivedLocation = true;
+
       const latitude = position.coords.latitude;
       const longitude = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
-      console.log("Latitude:", latitude);
-      console.log("Longitude:", longitude);
-      console.log("Accuracy:", accuracy, "meters");
-
-      // Update the marker whenever a better or newer
-      // location is reported.
-      if (accuracy <= bestAccuracy || bestAccuracy === Infinity) {
-        bestAccuracy = Math.min(bestAccuracy, accuracy);
-
-        showPosition(
-          latitude,
-          longitude,
-          "Live location",
-          accuracy
-        );
-      }
-
-      document.getElementById("status").textContent =
-        "Tracking location. Accuracy: " +
-        Math.round(accuracy) + " meters";
+      showPosition(
+        latitude,
+        longitude,
+        "Your location",
+        accuracy
+      );
     },
     function (error) {
-      document.getElementById("status").textContent =
-        "Location error: " + error.message;
-      console.error("GPS error:", error);
+      let message;
+
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          message =
+            "Location permission denied. Allow location access for this website in your browser settings.";
+          break;
+
+        case error.POSITION_UNAVAILABLE:
+          message =
+            "Your device cannot determine its location. Check Location Services.";
+          break;
+
+        case error.TIMEOUT:
+          message =
+            "Location request timed out. Try again somewhere with a clearer GPS signal.";
+          break;
+
+        default:
+          message = "Location error: " + error.message;
+      }
+
+      setStatus(message);
+      console.error("Geolocation error:", error.code, error.message);
     },
     {
       enableHighAccuracy: true,
@@ -404,6 +349,16 @@ function tryAcquireLocation() {
       timeout: 30000
     }
   );
+
+  // Keep live tracking active until the user stops it.
+  // This timer only updates the status; it does not stop tracking.
+  locationTimeout = setTimeout(() => {
+    if (!receivedLocation) {
+      setStatus(
+        "Still waiting for your location. Check permissions and try again."
+      );
+    }
+  }, 15000);
 }
 
 function stopTracking() {
@@ -412,106 +367,21 @@ function stopTracking() {
     locationWatchId = null;
   }
 
-  clearTimeout(locationTimeout);
-  document.getElementById("status").textContent =
-    "Tracking stopped.";
+  if (locationTimeout !== null) {
+    clearTimeout(locationTimeout);
+    locationTimeout = null;
+  }
+
+  setStatus("Location tracking stopped.");
 }
 
+// Initialize when the page has loaded.
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeMap);
+} else {
+  initializeMap();
+}
 
-    async function manualSearch() {
-      const query = manualInput.value.trim();
-
-      if (!query) {
-        setStatus("Enter a city or ZIP code.", "#d93025");
-        return;
-      }
-
-      searchButton.disabled = true;
-      setStatus("Searching for location...");
-
-      try {
-        const url = new URL(
-          "https://nominatim.openstreetmap.org/search"
-        );
-
-        url.searchParams.set("format", "jsonv2");
-        url.searchParams.set("limit", "1");
-        url.searchParams.set("q", query);
-
-        const response = await fetch(url.toString(), {
-          headers: {
-            "Accept": "application/json"
-          }
-        });
-
-        if (!response.ok) {
-          throw new Error("Search HTTP status: " + response.status);
-        }
-
-        const results = await response.json();
-
-        if (!results.length) {
-          setStatus("Location not found. Try another search.", "#d93025");
-          return;
-        }
-
-        const result = results[0];
-
-        showPosition(
-          Number(result.lat),
-          Number(result.lon),
-          result.display_name || query
-        );
-
-      } catch (error) {
-        console.error("Search error:", error);
-
-        setStatus(
-          "Search failed: " + error.message,
-          "#d93025"
-        );
-
-      } finally {
-        searchButton.disabled = false;
-      }
-    }
-
-    function toggleDiagnostics() {
-      if (diagnostics.style.display === "block") {
-        diagnostics.style.display = "none";
-        return;
-      }
-
-      const info = {
-        "Page URL": location.href,
-        "HTTPS / secure context": window.isSecureContext,
-        "Geolocation supported": Boolean(navigator.geolocation),
-        "Online": navigator.onLine,
-        "Browser": navigator.userAgent
-      };
-
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions.query({ name: "geolocation" })
-          .then(result => {
-            info["Location permission"] = result.state;
-            showDiagnostics(info);
-          })
-          .catch(() => showDiagnostics(info));
-      } else {
-        info["Location permission"] = "Permission API unavailable";
-        showDiagnostics(info);
-      }
-    }
-
-    locateButton.addEventListener("click", tryAcquireLocation);
-    searchButton.addEventListener("click", manualSearch);
-    diagnosticButton.addEventListener("click", toggleDiagnostics);
-
-    manualInput.addEventListener("keydown", event => {
-      if (event.key === "Enter") {
-        manualSearch();
-      }
-    });
   </script>
 </body>
 </html>
