@@ -339,66 +339,91 @@
       });
     }
 
-    function tryAcquireLocation() {
-      if (locationRequestInProgress) return;
+    
+let locationWatchId = null;
+let bestAccuracy = Infinity;
 
-      if (!window.isSecureContext) {
-        setStatus(
-          "This page is not in a secure context. Open the HTTPS GitHub Pages URL.",
-          "#d93025"
+function tryAcquireLocation() {
+  if (!navigator.geolocation) {
+    setStatus("Geolocation is not supported.", "#d93025");
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    setStatus("Open your tracker using HTTPS.", "#d93025");
+    return;
+  }
+
+  if (locationWatchId !== null) {
+    navigator.geolocation.clearWatch(locationWatchId);
+  }
+
+  bestAccuracy = Infinity;
+  setStatus("Improving location accuracy...");
+
+  const startedAt = Date.now();
+
+  locationWatchId = navigator.geolocation.watchPosition(
+    position => {
+      const { latitude, longitude, accuracy } = position.coords;
+
+      console.log("Latitude:", latitude);
+      console.log("Longitude:", longitude);
+      console.log("Accuracy:", accuracy, "meters");
+
+      // Ignore readings that are worse than the best recent reading.
+      if (accuracy < bestAccuracy) {
+        bestAccuracy = accuracy;
+
+        showPosition(
+          latitude,
+          longitude,
+          "Best recent device location",
+          accuracy
         );
-        showDiagnostics({
-          "Page URL": location.href,
-          "Secure context": window.isSecureContext
-        });
-        return;
       }
 
-      if (!navigator.geolocation) {
+      // Stop after 30 seconds, keeping the best reading.
+      if (Date.now() - startedAt >= 30000) {
+        navigator.geolocation.clearWatch(locationWatchId);
+        locationWatchId = null;
+
         setStatus(
-          "Geolocation is not supported by this browser.",
-          "#d93025"
+          "Best reported accuracy: ±" +
+          Math.round(bestAccuracy) + " meters"
         );
-        showDiagnostics({
-          "Geolocation API": "Unavailable",
-          "Browser": navigator.userAgent
-        });
-        return;
       }
+    },
+    error => {
+      console.error("GPS error:", error.code, error.message);
+      setStatus(
+        "Location error " + error.code + ": " + error.message,
+        "#d93025"
+      );
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 35000
+    }
+  );
 
-      locationRequestInProgress = true;
-      locateButton.disabled = true;
-      setStatus("Requesting your device location...");
+  // Stop watching after 35 seconds even if no good fix arrives.
+  setTimeout(() => {
+    if (locationWatchId !== null) {
+      navigator.geolocation.clearWatch(locationWatchId);
+      locationWatchId = null;
 
-      navigator.geolocation.getCurrentPosition(
-        position => {
-          locationRequestInProgress = false;
-          locateButton.disabled = false;
-
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          const accuracy = position.coords.accuracy;
-
-          console.log("GPS LATITUDE:", lat);
-          console.log("GPS LONGITUDE:", lng);
-          console.log("GPS ACCURACY:", accuracy, "meters");
-
-          showPosition(lat, lng, "Device location", accuracy);
-        },
-
-        error => {
-          locationRequestInProgress = false;
-          locateButton.disabled = false;
-          displayLocationError(error);
-        },
-
-        {
-          enableHighAccuracy: true,
-          timeout: 30000,
-          maximumAge: 0
-        }
+      setStatus(
+        Number.isFinite(bestAccuracy)
+          ? "Best reported accuracy: ±" +
+            Math.round(bestAccuracy) + " meters"
+          : "No location fix received.",
+        Number.isFinite(bestAccuracy) ? "#188038" : "#d93025"
       );
     }
+  }, 35000);
+}
 
     async function manualSearch() {
       const query = manualInput.value.trim();
