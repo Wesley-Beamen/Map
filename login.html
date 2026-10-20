@@ -1,0 +1,129 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Player Login</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #101827;
+      font-family: Arial, sans-serif;
+      color: white;
+    }
+
+    .container {
+      width: 90%;
+      max-width: 400px;
+      padding: 28px;
+      background: #1c2738;
+      border-radius: 14px;
+      box-shadow: 0 8px 30px #0005;
+    }
+
+    h1 {
+      text-align: center;
+      margin-top: 0;
+    }
+
+    p {
+      color: #b8c5d8;
+      text-align: center;
+    }
+
+    input {
+      width: 100%;
+      padding: 13px;
+      margin: 8px 0;
+      border: 1px solid #43516a;
+      border-radius: 7px;
+      background: #101827;
+      color: white;
+      font-size: 15px;
+    }
+
+    button {
+      width: 100%;
+      padding: 13px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 7px;
+      background: #2878f0;
+      color: white;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #344258;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    #status {
+      min-height: 40px;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Player Account</h1>
+    <p>Log in or create your account to enter the game.</p>
+
+    <form id="account-form">
+      <input
+        id="username"
+        type="text"
+        placeholder="Username (signup only)"
+        minlength="3"
+        maxlength="20"
+        autocomplete="username"
+      >
+
+      <input
+        id="email"
+        type="email"
+        placeholder="Email address"
+        autocomplete="email"
+        required
+      >
+
+      <input
+        id="password"
+        type="password"
+        placeholder="Password (minimum 8 characters)"
+        minlength="8"
+        autocomplete="current-password"
+        required
+      >
+
+      <button id="signup-button" type="button">Sign Up</button>
+      <button id="login-button" type="submit" class="secondary">
+        Log In
+      </button>
+    </form>
+
+    <p id="status" role="status" aria-live="polite"></p>
+  </div>
+
+  <script type="module" src="./login.js"></script>
+</body>
+</html>
+```
