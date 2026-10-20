@@ -343,87 +343,80 @@
 let locationWatchId = null;
 let bestAccuracy = Infinity;
 
+
+let locationWatchId = null;
+let bestAccuracy = Infinity;
+let locationTimeout = null;
+
 function tryAcquireLocation() {
   if (!navigator.geolocation) {
-    setStatus("Geolocation is not supported.", "#d93025");
+    document.getElementById("status").textContent =
+      "Geolocation is not supported by this browser.";
     return;
   }
 
-  if (!window.isSecureContext) {
-    setStatus("Open your tracker using HTTPS.", "#d93025");
-    return;
-  }
-
+  // Stop any previous tracking session.
   if (locationWatchId !== null) {
     navigator.geolocation.clearWatch(locationWatchId);
   }
+  clearTimeout(locationTimeout);
 
   bestAccuracy = Infinity;
-  setStatus("Improving location accuracy...");
 
-  const startedAt = Date.now();
+  document.getElementById("status").textContent =
+    "Finding your location...";
 
   locationWatchId = navigator.geolocation.watchPosition(
-    position => {
-      const { latitude, longitude, accuracy } = position.coords;
+    function (position) {
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+      const accuracy = position.coords.accuracy;
 
       console.log("Latitude:", latitude);
       console.log("Longitude:", longitude);
       console.log("Accuracy:", accuracy, "meters");
 
-      // Ignore readings that are worse than the best recent reading.
-      if (accuracy < bestAccuracy) {
-        bestAccuracy = accuracy;
+      // Update the marker whenever a better or newer
+      // location is reported.
+      if (accuracy <= bestAccuracy || bestAccuracy === Infinity) {
+        bestAccuracy = Math.min(bestAccuracy, accuracy);
 
         showPosition(
           latitude,
           longitude,
-          "Best recent device location",
+          "Live location",
           accuracy
         );
       }
 
-      // Stop after 30 seconds, keeping the best reading.
-      if (Date.now() - startedAt >= 30000) {
-        navigator.geolocation.clearWatch(locationWatchId);
-        locationWatchId = null;
-
-        setStatus(
-          "Best reported accuracy: ±" +
-          Math.round(bestAccuracy) + " meters"
-        );
-      }
+      document.getElementById("status").textContent =
+        "Tracking location. Accuracy: " +
+        Math.round(accuracy) + " meters";
     },
-    error => {
-      console.error("GPS error:", error.code, error.message);
-      setStatus(
-        "Location error " + error.code + ": " + error.message,
-        "#d93025"
-      );
+    function (error) {
+      document.getElementById("status").textContent =
+        "Location error: " + error.message;
+      console.error("GPS error:", error);
     },
     {
       enableHighAccuracy: true,
       maximumAge: 0,
-      timeout: 35000
+      timeout: 30000
     }
   );
-
-  // Stop watching after 35 seconds even if no good fix arrives.
-  setTimeout(() => {
-    if (locationWatchId !== null) {
-      navigator.geolocation.clearWatch(locationWatchId);
-      locationWatchId = null;
-
-      setStatus(
-        Number.isFinite(bestAccuracy)
-          ? "Best reported accuracy: ±" +
-            Math.round(bestAccuracy) + " meters"
-          : "No location fix received.",
-        Number.isFinite(bestAccuracy) ? "#188038" : "#d93025"
-      );
-    }
-  }, 35000);
 }
+
+function stopTracking() {
+  if (locationWatchId !== null) {
+    navigator.geolocation.clearWatch(locationWatchId);
+    locationWatchId = null;
+  }
+
+  clearTimeout(locationTimeout);
+  document.getElementById("status").textContent =
+    "Tracking stopped.";
+}
+
 
     async function manualSearch() {
       const query = manualInput.value.trim();
