@@ -6,9 +6,14 @@ const SUPABASE_URL = "https://rmvmwpldqgahfnknckhh.supabase.co";
 const SUPABASE_KEY = "sb_publishable_P1WEvLAFyU5JFLumNLiagg_UQz0Jhv2";
 
 const supabase = createClient(
+  
   SUPABASE_URL,
   SUPABASE_KEY
 );
+console.log("Supabase URL:", SUPABASE_URL);
+
+const { data, error } = await supabase.auth.getSession();
+console.log("Session test:", data, error);
 
 const form = document.getElementById("account-form");
 const usernameInput = document.getElementById("username");
